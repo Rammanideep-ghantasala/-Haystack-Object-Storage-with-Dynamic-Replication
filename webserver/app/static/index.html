@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Haystack Web Client</title>
+    <style>
+        body { font-family: Arial; margin: 30px; }
+        .photo { margin-bottom: 15px; }
+        button { margin-left: 10px; }
+        img { max-width: 150px; display: block; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Haystack Photo Manager</h1>
+
+    <h2>Upload Photo</h2>
+    <input type="file" id="photoInput">
+    <button onclick="uploadPhoto()">Upload</button>
+
+    <h2>Photos</h2>
+    <div id="photosList"></div>
+
+<script>
+    const apiBase = "http://localhost";
+
+    async function uploadPhoto() {
+        const file = document.getElementById('photoInput').files[0];
+        if (!file) return alert("Select a photo");
+
+        const reader = new FileReader();
+        reader.onload = async () => {
+            const result = reader.result;
+
+            const [meta, data] = result.split(",");
+            if (!data) return alert("Invalid base64 data");
+
+            const base64 = data;
+
+            const res = await fetch(`${apiBase}/object`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ value: base64 })
+            });
+
+            if (!res.ok) {
+                alert("Upload failed");
+                return;
+            }
+
+            const j = await res.json();
+            addPhotoToList(j.key);
+        };
+
+        reader.readAsDataURL(file);
+    }
+
+    function addPhotoToList(key) {
+        const container = document.getElementById("photosList");
+
+        const div = document.createElement("div");
+        div.className = "photo";
+        div.id = `photo-${key}`;
+
+        div.innerHTML = `
+            <strong>ID: ${key}</strong>
+            <button onclick="fetchPhoto('${key}')">Fetch</button>
+            <button onclick="deletePhoto('${key}')">Delete</button>
+            <div class="photoContent" id="content-${key}"></div>
+        `;
+
+        container.appendChild(div);
+    }
+
+    async function fetchPhoto(key) {
+        const contentDiv = document.getElementById(`content-${key}`);
+
+        const res = await fetch(`${apiBase}/object/${key}`);
+        if (!res.ok) {
+            contentDiv.innerHTML = `<span style="color:red">Not found</span>`;
+            return;
+        }
+
+        const j = await res.json();
+        if (!j.value) {
+            contentDiv.innerHTML = `<span style="color:red">No data</span>`;
+            return;
+        }
+
+        contentDiv.innerHTML = `<img src="data:image/*;base64,${j.value}">`;
+    }
+
+    async function deletePhoto(key) {
+        const res = await fetch(`${apiBase}/object/${key}`, {
+            method: "DELETE"
+        });
+
+        if (res.ok) {
+            document.getElementById(`photo-${key}`).remove();
+        } else {
+            alert("Delete failed");
+        }
+    }
+</script>
+</body>
+</html>

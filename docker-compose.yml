@@ -1,0 +1,377 @@
+version: '3.9'
+
+services:
+
+  redis1:
+    image: redis:7
+    container_name: redis1
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --appendfsync everysec
+      - --bind 0.0.0.0
+      - --protected-mode no
+      - --cluster-announce-ip redis1
+      - --cluster-announce-port 6379
+      - --cluster-announce-bus-port 16379
+    ports:
+      - "7006:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    networks:
+      - haystack-net
+
+  redis2:
+    image: redis:7
+    container_name: redis2
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --appendfsync everysec
+      - --bind 0.0.0.0
+      - --protected-mode no
+      - --cluster-announce-ip redis2
+      - --cluster-announce-port 6379
+      - --cluster-announce-bus-port 16379
+    ports:
+      - "7007:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    networks:
+      - haystack-net
+
+  redis3:
+    image: redis:7
+    container_name: redis3
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --appendfsync everysec
+      - --bind 0.0.0.0
+      - --protected-mode no
+      - --cluster-announce-ip redis3
+      - --cluster-announce-port 6379
+      - --cluster-announce-bus-port 16379
+    ports:
+      - "7008:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    networks:
+      - haystack-net
+
+  redis4:
+    image: redis:7
+    container_name: redis4
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --appendfsync everysec
+      - --bind 0.0.0.0
+      - --protected-mode no
+      - --cluster-announce-ip redis4
+      - --cluster-announce-port 6379
+      - --cluster-announce-bus-port 16379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    networks:
+      - haystack-net
+
+  redis5:
+    image: redis:7
+    container_name: redis5
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --appendfsync everysec
+      - --bind 0.0.0.0
+      - --protected-mode no
+      - --cluster-announce-ip redis5
+      - --cluster-announce-port 6379
+      - --cluster-announce-bus-port 16379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    networks:
+      - haystack-net
+
+  redis6:
+    image: redis:7
+    container_name: redis6
+    command:
+      - redis-server
+      - --cluster-enabled yes
+      - --cluster-config-file nodes.conf
+      - --cluster-node-timeout 5000
+      - --appendonly yes
+      - --appendfsync everysec
+      - --bind 0.0.0.0
+      - --protected-mode no
+      - --cluster-announce-ip redis6
+      - --cluster-announce-port 6379
+      - --cluster-announce-bus-port 16379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    networks:
+      - haystack-net
+
+  redis-cluster-init:
+    image: redis:7
+    container_name: redis-cluster-init
+    depends_on:
+      redis1:
+        condition: service_healthy
+      redis2:
+        condition: service_healthy
+      redis3:
+        condition: service_healthy
+      redis4:
+        condition: service_healthy
+      redis5:
+        condition: service_healthy
+      redis6:
+        condition: service_healthy
+    volumes:
+      - ./redis-init.sh:/redis-init.sh
+    entrypoint: ["bash", "/redis-init.sh"]
+    networks:
+      - haystack-net
+
+  directory1:
+    build: ./directory-service
+    container_name: directory1
+    ports:
+      - "7001:7001"
+    environment:
+      - PORT=7001
+      - REDIS_NODES=redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+    networks:
+      - haystack-net
+
+  directory2:
+    build: ./directory-service
+    container_name: directory2
+    ports:
+      - "7002:7002"
+    environment:
+      - PORT=7002
+      - REDIS_NODES=redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+    networks:
+      - haystack-net
+
+  directory3:
+    build: ./directory-service
+    container_name: directory3
+    ports:
+      - "7003:7003"
+    environment:
+      - PORT=7003
+      - REDIS_NODES=redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+    networks:
+      - haystack-net
+
+  store1:
+    build: ./store-service
+    container_name: store1
+    ports:
+      - "7101:7101"
+    environment:
+      - NODE_NAME=store1
+      - SELF_ADDRESS=store1:7101
+      - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
+      - DATA_PATH=/data
+      - PORT=7101
+    volumes:
+      - store1-data:/data
+    networks:
+      - haystack-net
+    depends_on:
+      - directory1
+      - directory2
+      - directory3
+
+  store2:
+    build: ./store-service
+    container_name: store2
+    ports:
+      - "7102:7102"
+    environment:
+      - NODE_NAME=store2
+      - SELF_ADDRESS=store2:7102
+      - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
+      - DATA_PATH=/data
+      - PORT=7102
+    volumes:
+      - store2-data:/data
+    networks:
+      - haystack-net
+    depends_on:
+      - directory1
+      - directory2
+      - directory3
+
+  store3:
+    build: ./store-service
+    container_name: store3
+    ports:
+      - "7103:7103"
+    environment:
+      - NODE_NAME=store3
+      - SELF_ADDRESS=store3:7103
+      - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
+      - DATA_PATH=/data
+      - PORT=7103
+    volumes:
+      - store3-data:/data
+    networks:
+      - haystack-net
+    depends_on:
+      - directory1
+      - directory2
+      - directory3
+
+  cache1:
+    build: ./cache-service
+    container_name: cache1
+    ports:
+      - "7201:7201"
+    environment:
+      - CACHE_NODE_ID=cache1
+      - SELF_ADDRESS=cache1:7201
+      - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
+      - PORT=7201
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6379
+    networks:
+      - haystack-net
+    depends_on:
+      - directory1
+
+  cache2:
+    build: ./cache-service
+    container_name: cache2
+    ports:
+      - "7202:7202"
+    environment:
+      - CACHE_NODE_ID=cache2
+      - SELF_ADDRESS=cache2:7202
+      - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
+      - PORT=7202
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6379
+    networks:
+      - haystack-net
+    depends_on:
+      - directory1
+
+  replication_manager:
+    build: ./replication-manager
+    container_name: replication_manager
+    environment:
+      - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
+      - PORT=7300
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6379
+    ports:
+      - "7300:7300"
+    networks:
+      - haystack-net
+    depends_on:
+      - directory1
+      - store1
+      - store2
+      - store3
+
+  webserver1:
+    build: ./webserver
+    container_name: webserver1
+    ports:
+      - "9001:9000"
+    environment:
+      - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
+      - CACHE_CLUSTER=cache1:7201,cache2:7202
+      - PORT=9000
+    networks:
+      - haystack-net
+    depends_on:
+      - directory1
+      - store1
+      - cache1
+
+  webserver2:
+    build: ./webserver
+    container_name: webserver2
+    ports:
+      - "9002:9000"
+    environment:
+      - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
+      - CACHE_CLUSTER=cache1:7201,cache2:7202
+      - PORT=9000
+    networks:
+      - haystack-net
+    depends_on:
+      - directory1
+      - store1
+      - cache1
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - webserver1
+      - webserver2
+    networks:
+      - haystack-net
+
+networks:
+  haystack-net:
+    driver: bridge
+
+volumes:
+  store1-data:
+  store2-data:
+  store3-data:
