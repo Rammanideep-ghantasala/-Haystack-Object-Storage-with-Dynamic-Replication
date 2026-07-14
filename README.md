@@ -34,12 +34,6 @@ This project implements that core idea as a set of independently deployable serv
 
 ---
 
-## Motivation
-
-Distributed object stores exist because scale eventually breaks every assumption a single-machine design makes: a single disk runs out of space, a single process becomes a throughput ceiling, and a single point of failure becomes unacceptable once enough things depend on it. Systems like Haystack, GFS, and S3 all converge on the same handful of ideas — separate metadata from data, replicate data across independent failure domains, and keep the hot path (reads) fast even while the cold path (placement, rebalancing, compaction) does more work in the background. This project builds a small, inspectable version of that same set of ideas, in order to actually reason about the tradeoffs rather than take them on faith.
-
----
-
 ## Features
 
 ### Append-only storage engine
