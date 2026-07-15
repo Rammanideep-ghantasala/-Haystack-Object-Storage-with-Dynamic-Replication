@@ -514,7 +514,3 @@ docker-compose down     # stop and remove containers
 `Distributed Systems` · `System Design` · `Storage Engine Design` · `Redis Cluster` · `FastAPI` · `Docker & Docker Compose` · `NGINX Load Balancing` · `Microservice Architecture` · `REST API Design` · `Fault Tolerance` · `Horizontal Scalability` · `Replication Algorithms` · `Distributed Caching` · `Object Storage` · `Metadata Management` · `Consistent Hashing` · `Service Discovery` · `Cloud-Native Infrastructure`
 
 ---
-
-## Learning Outcomes
-
-Building this surfaced problems that don't show up in single-machine designs: how to keep placement metadata consistent without a client ever seeing an inconsistent view, how to decide replication levels dynamically instead of guessing a fixed number up front, and how a component that looks correct in isolation (the cache tier, the replication scaler) can silently do nothing if a single environment variable in the deployment config is wrong — which is as much a lesson about operating distributed systems as it is about designing them.
