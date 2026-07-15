@@ -114,23 +114,17 @@ flowchart TB
 
 ## Features
 
-### Append-only storage engine
-Every store node appends new objects to a volume file (`volume_1.dat`, `volume_2.dat`, ...) rather than creating one file per object. Sequential writes avoid filesystem metadata overhead per object and keep write throughput independent of how many objects already exist on the node. An offset/size index (`index.json`) maps object keys to their position in the volume, so a read is a single seek rather than a directory lookup followed by a file open.
+**Append-only storage engine** — Objects are appended to volume files rather than stored one-per-file, avoiding per-object filesystem overhead. An offset/size index (`index.json`) makes reads a single seek instead of a directory lookup.
 
-### Directory service with delegated consistency
-The directory service tracks node membership (via `/join` and `/heartbeat`) and object placement (which store nodes hold which key). It deliberately does **not** implement its own replication or consensus protocol — all 3 directory replicas are stateless and operate directly against the same Redis Cluster keyspace, so Redis Cluster's own replication is the actual consistency mechanism. This avoids reimplementing a hard problem (consensus) for a component that doesn't need a custom solution.
+**Directory service with delegated consistency** — Tracks node membership and object placement via `/join` and `/heartbeat`. All 3 replicas are stateless and operate directly on Redis Cluster — no custom consensus layer reimplements what Redis Cluster already solves.
 
-### Distributed cache tier with consistent-hash routing
-A consistent hash ring (SHA-256, 50 virtual nodes per physical cache node) determines which cache node owns a given key, so adding or removing a cache node only reshuffles a small fraction of keys instead of invalidating the whole cache. The webserver checks the cache before falling back to store nodes on every read.
+**Distributed cache with consistent-hash routing** — A SHA-256 hash ring (50 virtual nodes/physical node) assigns cache ownership per key, so node churn reshuffles only a small fraction of keys instead of invalidating the whole cache.
 
-### EWMA-driven dynamic replication
-Rather than a fixed replication factor, the replication manager tracks each object's access rate as an exponential moving average (`rate = 0.3 × count + 0.7 × previous_rate`) on a recurring scan interval. Objects crossing a hot-object threshold get an additional replica pushed to a new store node; objects that cool back down have their excess replica removed. Baseline replication for every object is 2; only measurably hot objects are promoted to 3. This means replication overhead scales with actual demand rather than being paid upfront for every object regardless of popularity.
+**EWMA-driven dynamic replication** — Access rate per object is tracked as an exponential moving average (`rate = 0.3 × count + 0.7 × previous_rate`). Hot objects are promoted from 2 to 3 replicas; cooling ones are scaled back down. Replication cost tracks real demand instead of a flat factor.
 
-### Background compaction
-Deletes are implemented as tombstones rather than in-place file rewrites, which keeps the write path simple and fast. A background thread on each store node runs every 60 seconds and rewrites the volume file to physically reclaim space from tombstoned objects, trading a small amount of periodic I/O for bounded storage growth over time.
+**Background compaction** — Deletes are tombstones, not in-place rewrites, keeping the write/delete path fast. A background thread reclaims space every 60 seconds per store node.
 
-### Load-balanced, horizontally-replicated webserver tier
-NGINX distributes client requests across 2 webserver instances using least-connections balancing, so the client-facing tier can scale horizontally without any client-visible coordination.
+**Load-balanced webserver tier** — NGINX (`least_conn`) distributes traffic across 2 webserver replicas with no client-visible coordination.
 
 ---
 
