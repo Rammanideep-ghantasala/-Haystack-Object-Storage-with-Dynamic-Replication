@@ -34,61 +34,6 @@ This project implements that core idea as a set of independently deployable serv
 
 ---
 
-## Features
-
-### Append-only storage engine
-Every store node appends new objects to a volume file (`volume_1.dat`, `volume_2.dat`, ...) rather than creating one file per object. Sequential writes avoid filesystem metadata overhead per object and keep write throughput independent of how many objects already exist on the node. An offset/size index (`index.json`) maps object keys to their position in the volume, so a read is a single seek rather than a directory lookup followed by a file open.
-
-### Directory service with delegated consistency
-The directory service tracks node membership (via `/join` and `/heartbeat`) and object placement (which store nodes hold which key). It deliberately does **not** implement its own replication or consensus protocol — all 3 directory replicas are stateless and operate directly against the same Redis Cluster keyspace, so Redis Cluster's own replication is the actual consistency mechanism. This avoids reimplementing a hard problem (consensus) for a component that doesn't need a custom solution.
-
-### Distributed cache tier with consistent-hash routing
-A consistent hash ring (SHA-256, 50 virtual nodes per physical cache node) determines which cache node owns a given key, so adding or removing a cache node only reshuffles a small fraction of keys instead of invalidating the whole cache. The webserver checks the cache before falling back to store nodes on every read.
-
-### EWMA-driven dynamic replication
-Rather than a fixed replication factor, the replication manager tracks each object's access rate as an exponential moving average (`rate = 0.3 × count + 0.7 × previous_rate`) on a recurring scan interval. Objects crossing a hot-object threshold get an additional replica pushed to a new store node; objects that cool back down have their excess replica removed. Baseline replication for every object is 2; only measurably hot objects are promoted to 3. This means replication overhead scales with actual demand rather than being paid upfront for every object regardless of popularity.
-
-### Background compaction
-Deletes are implemented as tombstones rather than in-place file rewrites, which keeps the write path simple and fast. A background thread on each store node runs every 60 seconds and rewrites the volume file to physically reclaim space from tombstoned objects, trading a small amount of periodic I/O for bounded storage growth over time.
-
-### Load-balanced, horizontally-replicated webserver tier
-NGINX distributes client requests across 2 webserver instances using least-connections balancing, so the client-facing tier can scale horizontally without any client-visible coordination.
-
----
-
-## Distributed Systems Concepts Demonstrated
-
-| Concept | Where it shows up |
-|---|---|
-| **Distributed storage** | Append-only volumes spread across 3 independent store nodes |
-| **Metadata service** | Directory service, backed by Redis Cluster |
-| **Service discovery** | `/join` + `/heartbeat` node registration protocol |
-| **Consistent hashing** | Cache-node routing (SHA-256 hash ring, 50 virtual nodes/node) |
-| **Replication** | Access-pattern-driven replica scaling (2 ↔ 3) |
-| **Fault tolerance** | Replica fallback on read, directory replica fallback, heartbeat-based liveness |
-| **Background compaction** | Periodic volume rewrite to reclaim tombstoned space |
-| **Heartbeats** | Store/webserver nodes report liveness to the directory service |
-| **Horizontal scaling** | Every tier (webserver, directory, store, cache) runs multiple replicas behind discovery, not a fixed address |
-| **Distributed cache** | Hash-routed cache tier, independent of the store tier |
-| **High availability** | No single-instance service on the critical read/write path |
-| **Load balancing** | NGINX `least_conn` across webserver replicas |
-
----
-
-## Technology Stack
-
-| Layer | Technology | Purpose |
-|---|---|---|
-| Load Balancer | NGINX (`least_conn`) | Distributes client traffic across webserver replicas |
-| API Layer | FastAPI + Uvicorn (Python 3.11) | All 5 services (webserver, directory, store, cache, replication-manager) |
-| Metadata Store | Redis Cluster (6 nodes, 3 shards × 1 replica) | Node membership + object placement records |
-| Inter-service Communication | HTTP (via `requests`) | All service-to-service calls; no message queue or RPC framework |
-| Storage Engine | Custom append-only volume engine (Python) | Object bytes on disk, per store node |
-| Deployment | Docker Compose | 11-service local orchestration |
-| Consistent Hashing | Custom SHA-256 hash ring implementation | Cache-node selection |
-
----
-
 ## Architecture
 
 ```mermaid
@@ -166,6 +111,61 @@ flowchart TB
     style CacheTier fill:#4a3b00,color:#fff,stroke:#b8860b
     style RM fill:#4a0e2b,color:#fff,stroke:#c2185b
 ```
+
+## Features
+
+### Append-only storage engine
+Every store node appends new objects to a volume file (`volume_1.dat`, `volume_2.dat`, ...) rather than creating one file per object. Sequential writes avoid filesystem metadata overhead per object and keep write throughput independent of how many objects already exist on the node. An offset/size index (`index.json`) maps object keys to their position in the volume, so a read is a single seek rather than a directory lookup followed by a file open.
+
+### Directory service with delegated consistency
+The directory service tracks node membership (via `/join` and `/heartbeat`) and object placement (which store nodes hold which key). It deliberately does **not** implement its own replication or consensus protocol — all 3 directory replicas are stateless and operate directly against the same Redis Cluster keyspace, so Redis Cluster's own replication is the actual consistency mechanism. This avoids reimplementing a hard problem (consensus) for a component that doesn't need a custom solution.
+
+### Distributed cache tier with consistent-hash routing
+A consistent hash ring (SHA-256, 50 virtual nodes per physical cache node) determines which cache node owns a given key, so adding or removing a cache node only reshuffles a small fraction of keys instead of invalidating the whole cache. The webserver checks the cache before falling back to store nodes on every read.
+
+### EWMA-driven dynamic replication
+Rather than a fixed replication factor, the replication manager tracks each object's access rate as an exponential moving average (`rate = 0.3 × count + 0.7 × previous_rate`) on a recurring scan interval. Objects crossing a hot-object threshold get an additional replica pushed to a new store node; objects that cool back down have their excess replica removed. Baseline replication for every object is 2; only measurably hot objects are promoted to 3. This means replication overhead scales with actual demand rather than being paid upfront for every object regardless of popularity.
+
+### Background compaction
+Deletes are implemented as tombstones rather than in-place file rewrites, which keeps the write path simple and fast. A background thread on each store node runs every 60 seconds and rewrites the volume file to physically reclaim space from tombstoned objects, trading a small amount of periodic I/O for bounded storage growth over time.
+
+### Load-balanced, horizontally-replicated webserver tier
+NGINX distributes client requests across 2 webserver instances using least-connections balancing, so the client-facing tier can scale horizontally without any client-visible coordination.
+
+---
+
+## Distributed Systems Concepts Demonstrated
+
+| Concept | Where it shows up |
+|---|---|
+| **Distributed storage** | Append-only volumes spread across 3 independent store nodes |
+| **Metadata service** | Directory service, backed by Redis Cluster |
+| **Service discovery** | `/join` + `/heartbeat` node registration protocol |
+| **Consistent hashing** | Cache-node routing (SHA-256 hash ring, 50 virtual nodes/node) |
+| **Replication** | Access-pattern-driven replica scaling (2 ↔ 3) |
+| **Fault tolerance** | Replica fallback on read, directory replica fallback, heartbeat-based liveness |
+| **Background compaction** | Periodic volume rewrite to reclaim tombstoned space |
+| **Heartbeats** | Store/webserver nodes report liveness to the directory service |
+| **Horizontal scaling** | Every tier (webserver, directory, store, cache) runs multiple replicas behind discovery, not a fixed address |
+| **Distributed cache** | Hash-routed cache tier, independent of the store tier |
+| **High availability** | No single-instance service on the critical read/write path |
+| **Load balancing** | NGINX `least_conn` across webserver replicas |
+
+---
+
+## Technology Stack
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| Load Balancer | NGINX (`least_conn`) | Distributes client traffic across webserver replicas |
+| API Layer | FastAPI + Uvicorn (Python 3.11) | All 5 services (webserver, directory, store, cache, replication-manager) |
+| Metadata Store | Redis Cluster (6 nodes, 3 shards × 1 replica) | Node membership + object placement records |
+| Inter-service Communication | HTTP (via `requests`) | All service-to-service calls; no message queue or RPC framework |
+| Storage Engine | Custom append-only volume engine (Python) | Object bytes on disk, per store node |
+| Deployment | Docker Compose | 11-service local orchestration |
+| Consistent Hashing | Custom SHA-256 hash ring implementation | Cache-node selection |
+
+---
 
 **Component summary:**
 
