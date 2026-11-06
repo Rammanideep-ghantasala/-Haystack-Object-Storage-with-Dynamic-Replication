@@ -1,7 +1,8 @@
 import time
 import requests
 import os
-import redis
+import logging
+from redis.cluster import RedisCluster, ClusterNode
 from collections import defaultdict
 from threading import Lock
 
@@ -14,13 +15,27 @@ ALPHA = 0.3
 MIN_REPLICAS = 2
 MAX_REPLICAS = 3
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+logger = logging.getLogger("replication-manager.replicator")
 
-redis_client = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    decode_responses=True
+REDIS_NODES = os.getenv(
+    "REDIS_NODES",
+    "redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379"
+).split(",")
+
+
+def _startup_nodes():
+    nodes = []
+    for node in REDIS_NODES:
+        host, port = node.strip().split(":")
+        nodes.append(ClusterNode(host, int(port)))
+    return nodes
+
+
+redis_client = RedisCluster(
+    startup_nodes=_startup_nodes(),
+    decode_responses=True,
+    read_from_replicas=True,
+    skip_full_coverage_check=True,
 )
 
 
@@ -67,19 +82,17 @@ class ReplicaManager:
                 if ok:
                     return data
             except Exception:
-                continue
+                logger.exception("Directory request failed against %s", h)
         return None
 
     def get_store_nodes(self):
 
         def fn(node):
-            try:
-                r = requests.get(f"http://{node}/nodes", timeout=2)
-                if r.status_code == 200:
-                    return True, r.json().get("nodes", {})
-                return False, None
-            except Exception:
-                return False, None
+            r = requests.get(f"http://{node}/nodes", timeout=2)
+            if r.status_code == 200:
+                return True, r.json().get("nodes", {})
+            logger.warning("Directory %s returned %s for /nodes", node, r.status_code)
+            return False, None
 
         node_dict = self._try_all(fn) or {}
 
@@ -94,13 +107,16 @@ class ReplicaManager:
     def get_current_replicas(self, key):
 
         def fn_fetch(h):
-            try:
-                r = requests.get(f"http://{h}/placements/{key}", timeout=2)
-                if r.status_code == 200:
-                    return True, r.json().get("replicas", [])
-                return False, None
-            except Exception:
-                return False, None
+            r = requests.get(f"http://{h}/placements/{key}", timeout=2)
+            if r.status_code == 200:
+                return True, r.json().get("replicas", [])
+            logger.warning(
+                "Directory %s returned %s for placement key=%s",
+                h,
+                r.status_code,
+                key,
+            )
+            return False, None
 
         replica_ids = self._try_all(fn_fetch) or []
 
@@ -129,16 +145,30 @@ class ReplicaManager:
                 r = requests.post(f"http://{h}/placements/{key}", json=payload, timeout=2)
                 if r.status_code in (200, 201):
                     return True
+                logger.warning(
+                    "Directory %s returned %s while updating placement for key=%s",
+                    h,
+                    r.status_code,
+                    key,
+                )
             except Exception:
-                continue
+                logger.exception("Placement update failed against directory=%s key=%s", h, key)
 
         return False
     
     def fetch_object(self, node, key):
-
-        r = requests.get(f"http://{node['address']}/object/{key}", timeout=STORE_TIMEOUT)
-        if r.status_code == 200:
-            return r.json().get("value")
+        try:
+            r = requests.get(f"http://{node['address']}/object/{key}", timeout=STORE_TIMEOUT)
+            if r.status_code == 200:
+                return r.json().get("value")
+            logger.warning(
+                "Store %s returned %s while fetching key=%s",
+                node["address"],
+                r.status_code,
+                key,
+            )
+        except Exception:
+            logger.exception("Failed to fetch key=%s from store=%s", key, node["address"])
         
         return None
 
@@ -149,16 +179,32 @@ class ReplicaManager:
                 json={"value": value, "version": 0},
                 timeout=STORE_TIMEOUT
             )
-            return r.status_code in (200, 201)
+            if r.status_code in (200, 201):
+                return True
+            logger.warning(
+                "Store %s returned %s while pushing key=%s",
+                node["address"],
+                r.status_code,
+                key,
+            )
         except Exception:
-            return False
+            logger.exception("Failed to push key=%s to store=%s", key, node["address"])
+        return False
 
     def delete_object(self, node, key):
         try:
             r = requests.delete(f"http://{node['address']}/object/{key}", timeout=STORE_TIMEOUT)
-            return r.status_code in (200, 204)
+            if r.status_code in (200, 204):
+                return True
+            logger.warning(
+                "Store %s returned %s while deleting key=%s",
+                node["address"],
+                r.status_code,
+                key,
+            )
         except Exception:
-            return False
+            logger.exception("Failed to delete key=%s from store=%s", key, node["address"])
+        return False
 
     def adjust_replicas(self, key):
         rate = self.access_rate.get(key, 0.0)
@@ -205,17 +251,25 @@ class ReplicaManager:
             if removed:
                 self._update_directory_placement(key, current_ids)
 
-                redis_client.srem("hot_keys", key)
+                try:
+                    redis_client.srem("hot_keys", key)
+                except Exception:
+                    logger.exception("Failed to remove cooled key=%s from hot_keys", key)
 
     def monitor_loop(self):
 
         while True:
             time.sleep(SCAN_INTERVAL)
-            self.update_access_rates()
+            try:
+                self.update_access_rates()
+            except Exception:
+                logger.exception("Failed to update access rates")
+                continue
 
             try:
                 hot_keys = redis_client.smembers("hot_keys")
             except Exception:
+                logger.exception("Failed to read hot_keys from Redis Cluster")
                 hot_keys = set()
 
             for key in hot_keys:

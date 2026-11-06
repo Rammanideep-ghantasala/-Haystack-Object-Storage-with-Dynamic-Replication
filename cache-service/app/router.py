@@ -1,23 +1,45 @@
 from fastapi import APIRouter, HTTPException, Body
 import state
-import redis
 import os
+import logging
+from redis.cluster import RedisCluster, ClusterNode
 
 router = APIRouter()
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+logger = logging.getLogger("cache-service.router")
 
-r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=False)
+REDIS_NODES = os.getenv(
+    "REDIS_NODES",
+    "redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379"
+).split(",")
+
+
+def _startup_nodes():
+    nodes = []
+    for node in REDIS_NODES:
+        host, port = node.strip().split(":")
+        nodes.append(ClusterNode(host, int(port)))
+    return nodes
+
+
+r = RedisCluster(
+    startup_nodes=_startup_nodes(),
+    decode_responses=True,
+    read_from_replicas=True,
+    skip_full_coverage_check=True,
+)
 
 @router.get("/get/{key}")
 def get_value(key: str):
-    data = r.get(key)
-    if data is None:
-        return {"hit": False}
+    try:
+        data = r.get(key)
+        if data is None:
+            return {"hit": False}
 
-    value = data.decode("utf-8")
-    return {"hit": True, "value": value}
+        return {"hit": True, "value": data}
+    except Exception as exc:
+        logger.exception("Redis Cluster cache get failed for key=%s", key)
+        raise HTTPException(503, f"Cache read failed: {exc}") from exc
 
 @router.post("/set/{key}")
 def set_value(key: str, body: dict = Body(...)):
@@ -35,19 +57,25 @@ def set_value(key: str, body: dict = Body(...)):
     if responsible["id"] != state.cluster.self_id:
         raise HTTPException(403, f"This node is not responsible for key {key}")
 
-    value_bytes = value.encode("utf-8")
-
-    if ttl:
-        r.set(key, value_bytes, ex=ttl)
-    else:
-        r.set(key, value_bytes)
+    try:
+        if ttl:
+            r.set(key, value, ex=ttl)
+        else:
+            r.set(key, value)
+    except Exception as exc:
+        logger.exception("Redis Cluster cache set failed for key=%s", key)
+        raise HTTPException(503, f"Cache write failed: {exc}") from exc
 
     return {"stored_at": state.cluster.self_id}
 
 @router.post("/invalidate/{key}")
 def invalidate(key: str):
-    r.delete(key)
-    return {"status": "ok"}
+    try:
+        r.delete(key)
+        return {"status": "ok"}
+    except Exception as exc:
+        logger.exception("Redis Cluster cache invalidate failed for key=%s", key)
+        raise HTTPException(503, f"Cache invalidate failed: {exc}") from exc
 
 @router.get("/health")
 def health():

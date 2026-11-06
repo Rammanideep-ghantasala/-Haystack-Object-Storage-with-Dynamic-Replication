@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Body
 from typing import Dict
+import logging
 import state
 
 router = APIRouter()
+logger = logging.getLogger("store-service.router")
 
 @router.get("/object/{key}")
 def get_object(key: str):
@@ -33,6 +35,7 @@ def put_object(key: str, payload: Dict = Body(...)):
         return {"status": "ok", "version": 1}
 
     except Exception as e:
+        logger.exception("Store write failed for key=%s", key)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/object/{key}")
@@ -57,14 +60,15 @@ def replicate(payload: Dict[str, dict]):
             }
             state.store_engine.write(write_payload)
             accepted.append(key)
-        except:
-            pass
+        except Exception:
+            logger.exception("Replica batch write failed for key=%s", key)
 
     return {"accepted": accepted}
 
 @router.get("/list_keys")
 def list_keys():
-    keys = list(state.store_engine.index.keys())
+    with state.store_engine.store_lock:
+        keys = list(state.store_engine.index.keys())
     return {"keys": keys}
 
 @router.post("/join")

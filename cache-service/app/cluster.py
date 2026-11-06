@@ -1,9 +1,11 @@
 import time
 import requests
 import os
+import logging
 
 HEARTBEAT_INTERVAL = 2
 DIRECTORY_TIMEOUT  = 4
+logger = logging.getLogger("cache-service.cluster")
 
 class CacheNodeMembership:
     def __init__(self, self_id, self_address, directory_service):
@@ -24,10 +26,10 @@ class CacheNodeMembership:
                 params={"node_id": self.self_id, "address": self.self_address},
                 timeout=3
             )
-            print(f"[Cache {self.self_id}] Registered with {self.directory}")
+            logger.info("Cache %s registered with directory %s", self.self_id, self.directory)
 
-        except Exception as e:
-            print(f"[Cache {self.self_id}] Failed to register with directory: {e}")
+        except Exception:
+            logger.exception("Cache %s failed to register with directory %s", self.self_id, self.directory)
 
     def heartbeat_thread(self):
         url = f"http://{self.directory}/heartbeat"
@@ -39,8 +41,8 @@ class CacheNodeMembership:
                     params={"node_id": self.self_id},
                     timeout=2
                 )
-            except:
-                pass
+            except Exception:
+                logger.exception("Cache %s heartbeat failed against directory %s", self.self_id, self.directory)
             time.sleep(HEARTBEAT_INTERVAL)
 
     def active_nodes(self):
@@ -62,4 +64,5 @@ class CacheNodeMembership:
             return cache_nodes
 
         except Exception:
+            logger.exception("Cache %s failed to fetch active cache nodes", self.self_id)
             return []

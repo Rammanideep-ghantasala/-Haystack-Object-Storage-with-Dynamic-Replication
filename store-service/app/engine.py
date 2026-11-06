@@ -2,10 +2,13 @@ import os
 import threading
 import time
 import json
+import logging
 from pathlib import Path
 from base64 import b64encode, b64decode
 
-DATA_DIR = Path('data')
+logger = logging.getLogger("store-service.engine")
+
+DATA_DIR = Path(os.getenv("DATA_PATH", "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_FILE = DATA_DIR / 'index.json'
 
@@ -20,7 +23,8 @@ class StoreEngine:
         if INDEX_FILE.exists():
             try:
                 self.index = json.loads(INDEX_FILE.read_text())
-            except:
+            except Exception:
+                logger.exception("Failed to load persisted index from %s; starting with empty index", INDEX_FILE)
                 self.index = {}
 
         for vpath in self.volumes.values():
@@ -29,6 +33,7 @@ class StoreEngine:
         self.cache = {}
         self.cache_lock = threading.Lock()
         self.CACHE_LIMIT = 2000
+        self.store_lock = threading.RLock()
 
         threading.Thread(target=self._compaction_scheduler, daemon=True).start()
 
@@ -49,101 +54,106 @@ class StoreEngine:
             self.cache.pop(photo_id, None)
 
     def _persist_index(self):
+        # Called while store_lock is held by write/delete/compaction callers.
         INDEX_FILE.write_text(json.dumps(self.index))
 
     def write(self, payload: dict):
-        photo_id = payload["photo_id"]
-        volume_id = payload["volume_id"]
-        data = b64decode(payload["photo_data"])
+        with self.store_lock:
+            photo_id = payload["photo_id"]
+            volume_id = payload["volume_id"]
+            data = b64decode(payload["photo_data"])
 
-        vpath = self.volumes.get(volume_id)
-        if not vpath:
-            return {"status": "error", "reason": "volume not found"}
+            vpath = self.volumes.get(volume_id)
+            if not vpath:
+                return {"status": "error", "reason": "volume not found"}
 
-        with vpath.open("ab") as f:
-            offset = f.tell()
-            f.write(len(data).to_bytes(8, "big"))
-            f.write(data)
+            with vpath.open("ab") as f:
+                offset = f.tell()
+                f.write(len(data).to_bytes(8, "big"))
+                f.write(data)
 
-        self.index[photo_id] = {
-            "volume": volume_id,
-            "offset": offset,
-            "size": len(data),
-            "deleted": False
-        }
-        self._persist_index()
-
-        self._cache_set(photo_id, data)
-
-        return {"status": "success", "offset": offset, "size": len(data)}
-
-    def read(self, photo_id: str):
-        cached = self._cache_get(photo_id)
-        if cached:
-            return {
-                "photo_id": photo_id,
-                "volume_id": "cache",
-                "data": b64encode(cached).decode()
+            self.index[photo_id] = {
+                "volume": volume_id,
+                "offset": offset,
+                "size": len(data),
+                "deleted": False
             }
-
-        entry = self.index.get(photo_id)
-        if not entry or entry.get("deleted"):
-            return None
-
-        vpath = self.volumes.get(entry["volume"])
-        if not vpath:
-            return None
-
-        with vpath.open("rb") as f:
-            f.seek(entry["offset"])
-            size = int.from_bytes(f.read(8), "big")
-            data = f.read(size)
-
-        self._cache_set(photo_id, data)
-
-        return {
-            "photo_id": photo_id,
-            "volume_id": entry["volume"],
-            "data": b64encode(data).decode()
-        }
-
-    def mark_deleted(self, photo_id: str):
-        if photo_id in self.index:
-            self.index[photo_id]["deleted"] = True
             self._persist_index()
 
-        self._cache_delete(photo_id)
+            self._cache_set(photo_id, data)
+
+            return {"status": "success", "offset": offset, "size": len(data)}
+
+    def read(self, photo_id: str):
+        with self.store_lock:
+            cached = self._cache_get(photo_id)
+            if cached is not None:
+                return {
+                    "photo_id": photo_id,
+                    "volume_id": "cache",
+                    "data": b64encode(cached).decode()
+                }
+
+            entry = self.index.get(photo_id)
+            if not entry or entry.get("deleted"):
+                return None
+
+            vpath = self.volumes.get(entry["volume"])
+            if not vpath:
+                return None
+
+            with vpath.open("rb") as f:
+                f.seek(entry["offset"])
+                size = int.from_bytes(f.read(8), "big")
+                data = f.read(size)
+
+            self._cache_set(photo_id, data)
+
+            return {
+                "photo_id": photo_id,
+                "volume_id": entry["volume"],
+                "data": b64encode(data).decode()
+            }
+
+    def mark_deleted(self, photo_id: str):
+        with self.store_lock:
+            if photo_id in self.index:
+                self.index[photo_id]["deleted"] = True
+                self._persist_index()
+
+            self._cache_delete(photo_id)
 
     def compact(self):
-        for vol, path in self.volumes.items():
-            tmp = path.with_suffix(".tmp")
+        with self.store_lock:
+            for vol, path in self.volumes.items():
+                tmp = path.with_suffix(".tmp")
 
-            with tmp.open("wb") as out:
-                for pid, meta in self.index.items():
-                    if meta["deleted"]:
-                        continue
-                    if meta["volume"] != vol:
-                        continue
+                with tmp.open("wb") as out:
+                    for pid, meta in list(self.index.items()):
+                        if meta["deleted"]:
+                            continue
+                        if meta["volume"] != vol:
+                            continue
 
-                    with path.open("rb") as fin:
-                        fin.seek(meta["offset"])
-                        size = int.from_bytes(fin.read(8), "big")
-                        data = fin.read(size)
+                        with path.open("rb") as fin:
+                            fin.seek(meta["offset"])
+                            size = int.from_bytes(fin.read(8), "big")
+                            data = fin.read(size)
 
-                        new_offset = out.tell()
-                        out.write(len(data).to_bytes(8, "big"))
-                        out.write(data)
+                            new_offset = out.tell()
+                            out.write(len(data).to_bytes(8, "big"))
+                            out.write(data)
 
-                        self.index[pid]["offset"] = new_offset
+                            self.index[pid]["offset"] = new_offset
 
-            tmp.replace(path)
+                tmp.replace(path)
 
-        self._persist_index()
+            self._persist_index()
 
     def _compaction_scheduler(self):
         while True:
             time.sleep(60)
             try:
                 self.compact()
-            except:
-                pass
+            except Exception:
+                logger.exception("Background compaction failed")

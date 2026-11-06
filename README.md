@@ -422,6 +422,8 @@ Haystack-Object-Storage-with-Dynamic-Replication/
 ├── docker-compose.yml
 ├── nginx.conf
 ├── redis-init.sh              # Redis Cluster bootstrap with health-check polling
+├── scripts/
+│   └── verify_e2e.py           # local end-to-end behavior check
 └── docker_nuke.sh             # local environment reset script
 ```
 
@@ -429,22 +431,54 @@ Haystack-Object-Storage-with-Dynamic-Replication/
 
 ## Docker Deployment
 
-The full system is defined as an 11-service Docker Compose topology: a 6-node Redis Cluster (3 shards × 1 replica each), 3 directory-service replicas, 3 store nodes, 2 cache nodes, 1 replication manager, 2 webserver replicas, and an NGINX load balancer in front of them. `redis-init.sh` runs as part of startup and polls `cluster_state:ok` with a bounded retry loop before dependent services come up, rather than relying on a fixed sleep — avoiding the common startup-ordering race in multi-container Redis Cluster setups.
+The full system is defined as a local Docker Compose topology: a 6-node Redis Cluster (3 shards × 1 replica each), 3 directory-service replicas, 3 store nodes, 2 cache nodes, 1 replication manager, 2 webserver replicas, and an NGINX load balancer in front of them. `redis-init.sh` runs as part of startup and polls `cluster_state:ok` with a bounded retry loop before dependent services come up. The directory service, cache service, and replication manager all connect to the same Redis Cluster through `REDIS_NODES`.
 
 ```bash
 git clone <repository-url>
 cd Haystack-Object-Storage-with-Dynamic-Replication
-docker-compose up --build
+docker compose up --build
 ```
 
-The web UI is available at `http://localhost` once all services report healthy.
+The web UI is available at `http://localhost` once all services report healthy. If another local server already owns port 80, use the exposed webserver ports directly, for example `http://localhost:9001`.
 
 ```bash
-docker-compose down     # stop and remove containers
-./docker_nuke.sh        # full local Docker environment reset (destructive)
+docker compose down     # stop and remove containers
+bash docker_nuke.sh     # full local Docker environment reset (destructive)
 ```
 
-> **Known limitation:** `cache-service` and `replication-manager` currently point `REDIS_HOST` at `localhost` in `docker-compose.yml`, which resolves to each container's own loopback rather than a reachable Redis instance. In practice this means cache reads/writes fail closed (the webserver treats it as a cache miss and falls through to store nodes transparently, so correctness isn't affected) and the replication manager's background scaling loop does not currently run to completion. The fix is a one-line change — pointing `REDIS_HOST` at a reachable Redis node — not a code change to `replicator.py` or the cache service itself.
+### End-to-End Verification
+
+After the Compose stack is running, execute the verification script from another terminal:
+
+```bash
+python scripts/verify_e2e.py
+```
+
+The script uses the public web endpoint and one exposed directory replica to verify the core behavior:
+
+1. upload an object through NGINX/webserver,
+2. confirm the initial placement has 2 store replicas,
+3. read the object back and compare the payload,
+4. issue repeated reads to trigger the EWMA hot-object path,
+5. poll placement until the replication manager promotes the object to 3 replicas,
+6. delete the object, and
+7. confirm the placement record is removed.
+
+If your local web or directory ports differ, override them:
+
+```bash
+python scripts/verify_e2e.py --base-url http://localhost --directory-url http://localhost:7001
+```
+
+If port 80 is already occupied on your machine, point the verifier at one of the exposed webserver replicas:
+
+```bash
+python scripts/verify_e2e.py --base-url http://localhost:9001 --directory-url http://localhost:7001
+```
+
+## Verified Behavior
+
+The included verifier checks the upload, read, cache-visible read path, access notification, dynamic promotion from 2 to 3 replicas, delete fan-out, cache invalidation path, and placement removal. It is intentionally small and local; it is not a full load, failure-injection, or durability test suite.
 
 ---
 
@@ -496,15 +530,27 @@ docker-compose down     # stop and remove containers
 
 ---
 
+## Current Limitations
+
+- **Local Docker deployment only** — this Compose setup is meant for local demonstration and validation, not direct production use.
+- **No authentication or authorization** — client-facing and internal endpoints do not require credentials.
+- **No checksums or record magic numbers** — stored bytes are not validated for corruption at read time.
+- **Limited tests** — the repository includes a local end-to-end verifier, but no CI pipeline or broad unit/integration test suite yet.
+- **No automatic repair for failed store nodes** — reads can fall back to surviving replicas, but node-failure-driven re-replication is not implemented.
+- **No enforced object versioning** — the API passes a `version` field through some paths, but conflict detection is not implemented.
+- **Single local Redis Cluster dependency** — metadata, cache values, and hot-key tracking all rely on the local Redis Cluster configured by Compose.
+
+---
+
 ## Future Improvements
 
 - **Erasure coding** for storage efficiency at higher replication scale, instead of full-copy replication only
-- **Object versioning with real conflict resolution** — the API currently exposes a `version` field that isn't enforced against prior writes
-- **Authentication/authorization** — no service or client-facing endpoint currently requires credentials
+- **Object versioning with real conflict resolution**
+- **Authentication/authorization**
 - **Prometheus + Grafana** for request latency, replication events, and compaction metrics
 - **Multi-region replication** for geographic fault isolation
 - **Consensus-based directory metadata** (e.g., Raft) as an alternative to delegating entirely to Redis Cluster, if metadata consistency requirements ever exceed what Redis Cluster provides
-- **Checksums on stored records** to detect corruption at read time
+- **Checksums on stored records**
 - **Multi-volume write distribution** at the store-node API layer (the storage engine already supports multiple volumes; the current routing logic doesn't yet distribute writes across them)
 
 ---

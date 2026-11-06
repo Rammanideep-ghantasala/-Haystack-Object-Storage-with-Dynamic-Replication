@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
 
   redis1:
@@ -14,7 +12,6 @@ services:
       - --appendfsync everysec
       - --bind 0.0.0.0
       - --protected-mode no
-      - --cluster-announce-ip redis1
       - --cluster-announce-port 6379
       - --cluster-announce-bus-port 16379
     ports:
@@ -39,7 +36,6 @@ services:
       - --appendfsync everysec
       - --bind 0.0.0.0
       - --protected-mode no
-      - --cluster-announce-ip redis2
       - --cluster-announce-port 6379
       - --cluster-announce-bus-port 16379
     ports:
@@ -64,7 +60,6 @@ services:
       - --appendfsync everysec
       - --bind 0.0.0.0
       - --protected-mode no
-      - --cluster-announce-ip redis3
       - --cluster-announce-port 6379
       - --cluster-announce-bus-port 16379
     ports:
@@ -89,7 +84,6 @@ services:
       - --appendfsync everysec
       - --bind 0.0.0.0
       - --protected-mode no
-      - --cluster-announce-ip redis4
       - --cluster-announce-port 6379
       - --cluster-announce-bus-port 16379
     healthcheck:
@@ -112,7 +106,6 @@ services:
       - --appendfsync everysec
       - --bind 0.0.0.0
       - --protected-mode no
-      - --cluster-announce-ip redis5
       - --cluster-announce-port 6379
       - --cluster-announce-bus-port 16379
     healthcheck:
@@ -135,7 +128,6 @@ services:
       - --appendfsync everysec
       - --bind 0.0.0.0
       - --protected-mode no
-      - --cluster-announce-ip redis6
       - --cluster-announce-port 6379
       - --cluster-announce-bus-port 16379
     healthcheck:
@@ -280,12 +272,14 @@ services:
       - SELF_ADDRESS=cache1:7201
       - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
       - PORT=7201
-      - REDIS_HOST=localhost
-      - REDIS_PORT=6379
+      - REDIS_NODES=redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379
     networks:
       - haystack-net
     depends_on:
-      - directory1
+      redis-cluster-init:
+        condition: service_completed_successfully
+      directory1:
+        condition: service_started
 
   cache2:
     build: ./cache-service
@@ -297,12 +291,14 @@ services:
       - SELF_ADDRESS=cache2:7202
       - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
       - PORT=7202
-      - REDIS_HOST=localhost
-      - REDIS_PORT=6379
+      - REDIS_NODES=redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379
     networks:
       - haystack-net
     depends_on:
-      - directory1
+      redis-cluster-init:
+        condition: service_completed_successfully
+      directory1:
+        condition: service_started
 
   replication_manager:
     build: ./replication-manager
@@ -310,10 +306,7 @@ services:
     environment:
       - DIRECTORY_SERVICE=directory1:7001,directory2:7002,directory3:7003
       - PORT=7300
-      - REDIS_HOST=localhost
-      - REDIS_PORT=6379
-    ports:
-      - "7300:7300"
+      - REDIS_NODES=redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379
     networks:
       - haystack-net
     depends_on:
