@@ -31,7 +31,7 @@ The goal is to demonstrate practical distributed-systems design, not to wrap a d
 
 ---
 
-## What Recruiters Should Notice
+## Notice
 
 This project demonstrates more than CRUD API work. It shows system design and implementation across storage, distributed coordination, and operations.
 
