@@ -9,7 +9,7 @@
 ![Redis Cluster](https://img.shields.io/badge/Redis-Cluster%206%20nodes-DC382D?logo=redis&logoColor=white)
 ![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![NGINX](https://img.shields.io/badge/NGINX-load%20balancer-009639?logo=nginx&logoColor=white)
-[![CI](https://github.com/Rammanideep-ghantasala/-Haystack-Object-Storage-with-Dynamic-Replication/actions/workflows/ci.yml/badge.svg)](https://github.com/Rammanideep-ghantasala/-Haystack-Object-Storage-with-Dynamic-Replication/actions/workflows/ci.yml)
+[![CI](https://github.com/Rammanideep-ghantasala/Haystack-object-storage-dynamic-replication/actions/workflows/ci.yml/badge.svg)](https://github.com/Rammanideep-ghantasala/Haystack-object-storage-dynamic-replication/actions/workflows/ci.yml)
 
 </div>
 
@@ -538,7 +538,6 @@ This project is intentionally scoped as a local distributed-systems implementati
 - No authentication or authorization.
 - No TLS between services.
 - No checksum or record-level corruption detection.
-- No CI pipeline yet.
 - Limited tests beyond the local end-to-end verifier.
 - No automatic repair loop specifically triggered by store-node failure.
 - No object version conflict resolution.
@@ -552,7 +551,7 @@ This project is intentionally scoped as a local distributed-systems implementati
 - Add checksums to stored records.
 - Add Prometheus metrics and Grafana dashboards.
 - Add unit tests for the storage engine, hash ring, and replication manager.
-- Add CI for syntax checks, unit tests, and Compose validation.
+- Expand CI with service-level unit tests and reliable integration coverage.
 - Add automatic replica repair when a store node becomes unhealthy.
 - Add object versioning and conflict handling.
 - Add authentication for public and internal APIs.
