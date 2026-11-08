@@ -13,12 +13,19 @@ for node in REDIS_NODES:
     host, port = node.split(":")
     startup_nodes.append(ClusterNode(host, int(port)))
 
-r = RedisCluster(
-    startup_nodes=startup_nodes,
-    decode_responses=True,
-    read_from_replicas=True,
-    skip_full_coverage_check=True
-)
+_redis_client = None
+
+
+def get_redis_client():
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = RedisCluster(
+            startup_nodes=startup_nodes,
+            decode_responses=True,
+            read_from_replicas=True,
+            skip_full_coverage_check=True
+        )
+    return _redis_client
 
 MEMBERS_KEY = "directory:members"
 PLACEMENTS_KEY = "directory:placements"
@@ -29,16 +36,16 @@ def now():
 
 
 def set_member(node_id: str, data: dict):
-    r.hset(MEMBERS_KEY, node_id, json.dumps(data))
+    get_redis_client().hset(MEMBERS_KEY, node_id, json.dumps(data))
 
 
 def get_member(node_id: str):
-    raw = r.hget(MEMBERS_KEY, node_id)
+    raw = get_redis_client().hget(MEMBERS_KEY, node_id)
     return json.loads(raw) if raw else None
 
 
 def get_all_members():
-    all_members = r.hgetall(MEMBERS_KEY)
+    all_members = get_redis_client().hgetall(MEMBERS_KEY)
     alive = {}
     now_ts = now()
 
@@ -51,14 +58,14 @@ def get_all_members():
     return alive
 
 def set_placement(object_key: str, replicas: list):
-    r.hset(PLACEMENTS_KEY, object_key, json.dumps(replicas))
+    get_redis_client().hset(PLACEMENTS_KEY, object_key, json.dumps(replicas))
 
 
 def get_placement(object_key: str):
-    raw = r.hget(PLACEMENTS_KEY, object_key)
+    raw = get_redis_client().hget(PLACEMENTS_KEY, object_key)
     return json.loads(raw) if raw else None
 
 
 def delete_placement(object_key: str) -> bool:
-    removed = r.hdel(PLACEMENTS_KEY, object_key)
+    removed = get_redis_client().hdel(PLACEMENTS_KEY, object_key)
     return removed == 1

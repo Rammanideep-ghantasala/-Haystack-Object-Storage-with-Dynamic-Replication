@@ -9,6 +9,7 @@
 ![Redis Cluster](https://img.shields.io/badge/Redis-Cluster%206%20nodes-DC382D?logo=redis&logoColor=white)
 ![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![NGINX](https://img.shields.io/badge/NGINX-load%20balancer-009639?logo=nginx&logoColor=white)
+[![CI](https://github.com/Rammanideep-ghantasala/-Haystack-Object-Storage-with-Dynamic-Replication/actions/workflows/ci.yml/badge.svg)](https://github.com/Rammanideep-ghantasala/-Haystack-Object-Storage-with-Dynamic-Replication/actions/workflows/ci.yml)
 
 </div>
 
@@ -454,6 +455,12 @@ Example successful result:
 [verify] Deleting object
 [verify] PASS
 ```
+
+---
+
+## Continuous Integration
+
+GitHub Actions runs on pushes and pull requests to `main`. The CI workflow installs each Python service's dependencies, compiles and imports service modules with Python 3.11, runs `pytest` only when test files exist, and validates `docker-compose.yml` syntax without starting the full 11-service stack.
 
 ---
 

@@ -22,17 +22,24 @@ def _startup_nodes():
     return nodes
 
 
-r = RedisCluster(
-    startup_nodes=_startup_nodes(),
-    decode_responses=True,
-    read_from_replicas=True,
-    skip_full_coverage_check=True,
-)
+_redis_client = None
+
+
+def get_redis_client():
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = RedisCluster(
+            startup_nodes=_startup_nodes(),
+            decode_responses=True,
+            read_from_replicas=True,
+            skip_full_coverage_check=True,
+        )
+    return _redis_client
 
 @router.get("/get/{key}")
 def get_value(key: str):
     try:
-        data = r.get(key)
+        data = get_redis_client().get(key)
         if data is None:
             return {"hit": False}
 
@@ -59,9 +66,9 @@ def set_value(key: str, body: dict = Body(...)):
 
     try:
         if ttl:
-            r.set(key, value, ex=ttl)
+            get_redis_client().set(key, value, ex=ttl)
         else:
-            r.set(key, value)
+            get_redis_client().set(key, value)
     except Exception as exc:
         logger.exception("Redis Cluster cache set failed for key=%s", key)
         raise HTTPException(503, f"Cache write failed: {exc}") from exc
@@ -71,7 +78,7 @@ def set_value(key: str, body: dict = Body(...)):
 @router.post("/invalidate/{key}")
 def invalidate(key: str):
     try:
-        r.delete(key)
+        get_redis_client().delete(key)
         return {"status": "ok"}
     except Exception as exc:
         logger.exception("Redis Cluster cache invalidate failed for key=%s", key)

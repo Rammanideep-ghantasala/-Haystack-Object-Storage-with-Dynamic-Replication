@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-service-checks:
+    name: Python checks (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: webserver
+            app_dir: webserver/app
+          - service: directory-service
+            app_dir: directory-service/app
+          - service: store-service
+            app_dir: store-service/app
+          - service: cache-service
+            app_dir: cache-service/app
+          - service: replication-manager
+            app_dir: replication-manager/app
+
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      DIRECTORY_SERVICE: directory1:7001,directory2:7002,directory3:7003
+      REDIS_NODES: redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379
+      CACHE_NODE_ID: cache-ci
+      SELF_ADDRESS: cache-ci:7201
+      NODE_NAME: store-ci
+      PORT: "9000"
+      DATA_PATH: ${{ runner.temp }}/store-import-data
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ${{ matrix.service }}/requirements.txt
+
+      - name: Install service dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r "${{ matrix.service }}/requirements.txt"
+
+      - name: Compile Python files
+        run: python -m compileall -q "${{ matrix.app_dir }}"
+
+      - name: Import service modules
+        run: |
+          python - <<'PY'
+          import importlib
+          import os
+          import pathlib
+          import sys
+
+          app_dir = pathlib.Path("${{ matrix.app_dir }}").resolve()
+          os.chdir(app_dir)
+          sys.path.insert(0, str(app_dir))
+
+          for source in sorted(app_dir.glob("*.py")):
+              importlib.import_module(source.stem)
+
+          print(f"Imported all modules in {app_dir}")
+          PY
+
+  pytest:
+    name: Pytest when tests exist
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect pytest tests
+        id: tests
+        run: |
+          if find . -type f \( -name "test_*.py" -o -name "*_test.py" \) | grep -q .; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No pytest tests found; skipping pytest."
+          fi
+
+      - name: Set up Python 3.11
+        if: steps.tests.outputs.present == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install all service dependencies
+        if: steps.tests.outputs.present == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          for req in \
+            webserver/requirements.txt \
+            directory-service/requirements.txt \
+            store-service/requirements.txt \
+            cache-service/requirements.txt \
+            replication-manager/requirements.txt
+          do
+            python -m pip install -r "$req"
+          done
+          python -m pip install pytest
+
+      - name: Run pytest
+        if: steps.tests.outputs.present == 'true'
+        run: python -m pytest
+
+  compose-config:
+    name: Docker Compose config
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet

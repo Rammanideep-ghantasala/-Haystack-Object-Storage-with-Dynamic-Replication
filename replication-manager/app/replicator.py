@@ -31,12 +31,19 @@ def _startup_nodes():
     return nodes
 
 
-redis_client = RedisCluster(
-    startup_nodes=_startup_nodes(),
-    decode_responses=True,
-    read_from_replicas=True,
-    skip_full_coverage_check=True,
-)
+_redis_client = None
+
+
+def get_redis_client():
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = RedisCluster(
+            startup_nodes=_startup_nodes(),
+            decode_responses=True,
+            read_from_replicas=True,
+            skip_full_coverage_check=True,
+        )
+    return _redis_client
 
 
 class ReplicaManager:
@@ -63,11 +70,11 @@ class ReplicaManager:
 
                 target = self.desired_replica_count(new_rate)
 
-                in_hot = redis_client.sismember("hot_keys", key)
+                in_hot = get_redis_client().sismember("hot_keys", key)
 
                 if target > MIN_REPLICAS:
                     if not in_hot:
-                        redis_client.sadd("hot_keys", key)
+                        get_redis_client().sadd("hot_keys", key)
                             
             self.access_counts = defaultdict(int)
 
@@ -252,7 +259,7 @@ class ReplicaManager:
                 self._update_directory_placement(key, current_ids)
 
                 try:
-                    redis_client.srem("hot_keys", key)
+                    get_redis_client().srem("hot_keys", key)
                 except Exception:
                     logger.exception("Failed to remove cooled key=%s from hot_keys", key)
 
@@ -267,7 +274,7 @@ class ReplicaManager:
                 continue
 
             try:
-                hot_keys = redis_client.smembers("hot_keys")
+                hot_keys = get_redis_client().smembers("hot_keys")
             except Exception:
                 logger.exception("Failed to read hot_keys from Redis Cluster")
                 hot_keys = set()
