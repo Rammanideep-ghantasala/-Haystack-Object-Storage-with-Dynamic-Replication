@@ -21,7 +21,7 @@ jobs:
       SELF_ADDRESS: "cache-ci:7201"
       NODE_NAME: "store-ci"
       PORT: "9000"
-      DATA_PATH: "${{ runner.temp }}/store-import-data"
+      DATA_PATH: "/tmp/store-import-data"
 
     steps:
       - name: Checkout
