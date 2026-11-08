@@ -13,18 +13,21 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_FILE = DATA_DIR / 'index.json'
 
 class StoreEngine:
-    def __init__(self):
+    def __init__(self, data_dir: str | Path | None = None, num_volumes: int | None = None, start_compactor: bool = True):
+        self.data_dir = Path(data_dir) if data_dir is not None else DATA_DIR
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.index_file = self.data_dir / "index.json"
         self.volumes = {
-            f"V{idx+1}": DATA_DIR / f"volume_{idx+1}.dat"
-            for idx in range(int(os.getenv("NUM_VOLUMES", "2")))
+            f"V{idx+1}": self.data_dir / f"volume_{idx+1}.dat"
+            for idx in range(num_volumes or int(os.getenv("NUM_VOLUMES", "2")))
         }
 
         self.index = {}
-        if INDEX_FILE.exists():
+        if self.index_file.exists():
             try:
-                self.index = json.loads(INDEX_FILE.read_text())
+                self.index = json.loads(self.index_file.read_text())
             except Exception:
-                logger.exception("Failed to load persisted index from %s; starting with empty index", INDEX_FILE)
+                logger.exception("Failed to load persisted index from %s; starting with empty index", self.index_file)
                 self.index = {}
 
         for vpath in self.volumes.values():
@@ -35,7 +38,8 @@ class StoreEngine:
         self.CACHE_LIMIT = 2000
         self.store_lock = threading.RLock()
 
-        threading.Thread(target=self._compaction_scheduler, daemon=True).start()
+        if start_compactor:
+            threading.Thread(target=self._compaction_scheduler, daemon=True).start()
 
     def _cache_get(self, photo_id):
         with self.cache_lock:
@@ -55,7 +59,7 @@ class StoreEngine:
 
     def _persist_index(self):
         # Called while store_lock is held by write/delete/compaction callers.
-        INDEX_FILE.write_text(json.dumps(self.index))
+        self.index_file.write_text(json.dumps(self.index))
 
     def write(self, payload: dict):
         with self.store_lock:

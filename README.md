@@ -458,9 +458,28 @@ Example successful result:
 
 ---
 
+## Automated Tests
+
+Install the service dependencies and test dependency, then run:
+
+```bash
+python -m pytest
+```
+
+The pytest suite covers backend behavior that is safe to run without starting the full Docker topology:
+
+- store-service append-only writes, tombstone deletes, index persistence, and compaction offset rewrites,
+- cache-service consistent-hash routing and 50-virtual-node ring construction,
+- webserver replica fallback reads and partial-write rollback behavior,
+- replication-manager EWMA hot-object detection and promotion from 2 to 3 replicas.
+
+Tests use temporary directories and mocked HTTP/Redis boundaries so they remain deterministic in local runs and CI.
+
+---
+
 ## Continuous Integration
 
-GitHub Actions runs on pushes and pull requests to `main`. The CI workflow installs each Python service's dependencies, compiles and imports service modules with Python 3.11, runs `pytest` only when test files exist, and validates `docker-compose.yml` syntax without starting the full 11-service stack.
+GitHub Actions runs on pushes and pull requests to `main`. The CI workflow installs each Python service's dependencies, compiles and imports service modules with Python 3.11, runs `pytest`, and validates `docker-compose.yml` syntax without starting the full 11-service stack.
 
 ---
 
@@ -514,7 +533,7 @@ GitHub Actions runs on pushes and pull requests to `main`. The CI workflow insta
 
 ## Verified Behavior
 
-The current implementation has been verified locally with the included end-to-end script. The verified path covers:
+The current implementation has both automated pytest coverage and a local end-to-end verification script. The verified path covers:
 
 - webserver object upload,
 - successful store-node writes before placement registration,
@@ -527,7 +546,7 @@ The current implementation has been verified locally with the included end-to-en
 - cache invalidation path,
 - placement cleanup.
 
-This is a focused correctness check, not a full production test suite.
+The pytest suite also verifies compaction, tombstone cache safety, cache hash-ring determinism, fallback reads, dynamic replication decisions, and partial-write rollback behavior. This is focused correctness coverage, not a full production test suite.
 
 ---
 
@@ -538,7 +557,7 @@ This project is intentionally scoped as a local distributed-systems implementati
 - No authentication or authorization.
 - No TLS between services.
 - No checksum or record-level corruption detection.
-- Limited tests beyond the local end-to-end verifier.
+- Focused automated tests, but not exhaustive service or failure-injection coverage.
 - No automatic repair loop specifically triggered by store-node failure.
 - No object version conflict resolution.
 - No multi-region deployment support.
@@ -550,7 +569,7 @@ This project is intentionally scoped as a local distributed-systems implementati
 
 - Add checksums to stored records.
 - Add Prometheus metrics and Grafana dashboards.
-- Add unit tests for the storage engine, hash ring, and replication manager.
+- Expand unit and integration tests for deeper failure-injection coverage.
 - Expand CI with service-level unit tests and reliable integration coverage.
 - Add automatic replica repair when a store node becomes unhealthy.
 - Add object versioning and conflict handling.

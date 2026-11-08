@@ -38,6 +38,7 @@ jobs:
             store-service/requirements.txt
             cache-service/requirements.txt
             replication-manager/requirements.txt
+            requirements-dev.txt
 
       - name: Install service dependencies
         run: |
@@ -51,6 +52,7 @@ jobs:
           do
             python -m pip install -r "$req"
           done
+          python -m pip install -r requirements-dev.txt
 
       - name: Compile service Python files
         run: |
@@ -74,14 +76,8 @@ jobs:
             python scripts/ci_import_check.py "$app"
           done
 
-      - name: Run pytest if tests exist
-        run: |
-          if find . -type f \( -name "test_*.py" -o -name "*_test.py" \) | grep -q .; then
-            python -m pip install pytest
-            python -m pytest
-          else
-            echo "No pytest tests found; skipping pytest."
-          fi
+      - name: Run pytest
+        run: python -m pytest
 
       - name: Validate docker-compose.yml
         run: docker compose config --quiet
